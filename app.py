@@ -55,7 +55,8 @@ def generate_script_from_topic(topic, duration):
     print(f"\n🤖 Generating a {duration}-minute script for topic: '{topic}' with Gemini...")
     model = genai.GenerativeModel('gemini-2.5-flash')
     prompt = f"""
-    Generate a script for a {duration}-minute presentation on the topic: '{topic}'.
+    Generate a script for a {duration}-minute session on the topic: '{topic}'.
+    Adapt your style to the user's intent expressed in the topic text (e.g., seminar, presentation, introduction, interview, lesson, pitch, demo). Do not assume a default style.
     The script should be divided into a logical number of parts appropriate for the duration.
     Provide a generic timestamp range (e.g., "00:00-00:05") for each part.
     Your response MUST be a valid JSON object with a single key "script".
@@ -64,8 +65,8 @@ def generate_script_from_topic(topic, duration):
     Example format:
     {{
       "script": [
-        {{"timestamp": "00:00-00:05", "line": "Introduction line."}},
-        {{"timestamp": "00:06-00:12", "line": "Point one line."}}
+        {{"timestamp": "00:00-00:05", "line": "Introduction line tailored to the requested context."}},
+        {{"timestamp": "00:06-00:12", "line": "Next point."}}
       ]
     }}
     """
@@ -261,7 +262,26 @@ def get_feedback_from_gemini(original_script, transcription_data) -> FeedbackRep
         json_response = response.text.strip().replace("```json", "").replace("```", "")
         
         feedback_data = json.loads(json_response)
-        return FeedbackReport(**feedback_data)
+        # Coerce missing or malformed fields with safe defaults
+        coerced = {
+            "score": float(feedback_data.get("score", 0.0) or 0.0),
+            "overall_feedback": feedback_data.get("overall_feedback", "") or "",
+            "word_repetition_score": float(feedback_data.get("word_repetition_score", 0.0) or 0.0),
+            "word_repetition_count": int(feedback_data.get("word_repetition_count", 0) or 0),
+            "speaking_pace_score": float(feedback_data.get("speaking_pace_score", 0.0) or 0.0),
+            "speaking_pace_count": int(feedback_data.get("speaking_pace_count", 0) or 0),
+            "filler_words_score": float(feedback_data.get("filler_words_score", 0.0) or 0.0),
+            "voice_clarity_score": float(feedback_data.get("voice_clarity_score", 0.0) or 0.0),
+            "filler_words_count": int(feedback_data.get("filler_words_count", 0) or 0),
+            "repetitive_words_list": feedback_data.get("repetitive_words_list") or [],
+            "detailed_tips": feedback_data.get("detailed_tips") or [],
+        }
+        # Ensure types for list fields
+        if not isinstance(coerced["repetitive_words_list"], list):
+            coerced["repetitive_words_list"] = []
+        if not isinstance(coerced["detailed_tips"], list):
+            coerced["detailed_tips"] = []
+        return FeedbackReport(**coerced)
 
     except (ValidationError, json.JSONDecodeError) as e:
         print(f"Error validating or parsing the feedback response: {e}")
@@ -273,7 +293,9 @@ def get_feedback_from_gemini(original_script, transcription_data) -> FeedbackRep
         score=0.0,
         overall_feedback="Could not generate valid feedback due to an API or parsing error.",
         word_repetition_score=0.0,
+        word_repetition_count=0,
         speaking_pace_score=0.0,
+        speaking_pace_count=0,
         filler_words_score=0.0,
         voice_clarity_score=0.0,
         filler_words_count=0,
@@ -319,9 +341,17 @@ def display_feedback_report(feedback_data: FeedbackReport):
 app = FastAPI(title="Voice Coach Backend")
 
 # Enable CORS for local frontend
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        # Your Firebase Frontend URL
+        "https://frontend-53528.web.app",  # <--- ADD THIS
+        
+        # Your Render Backend URL (good to have)
+        "https://backend-0d8r.onrender.com",      # <--- ADD THIS
+        
+        # Local URLs for testing
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
@@ -363,6 +393,13 @@ async def api_analyze(
         original_script = []
 
     audio_bytes = await audio.read()
+    # Save uploaded audio to backend/speech.wav
+    try:
+        target_path = os.path.join(os.path.dirname(__file__), 'speech.wav')
+        with open(target_path, 'wb') as f:
+            f.write(audio_bytes)
+    except Exception as e:
+        print(f"Failed to save audio file: {e}")
     mime_type = audio.content_type or mimetypes.guess_type(audio.filename or "")[0] or "audio/webm"
 
     transcription_data = transcribe_audio_bytes(mime_type, audio_bytes)
