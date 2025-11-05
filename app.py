@@ -340,16 +340,17 @@ def display_feedback_report(feedback_data: FeedbackReport):
 # ------------------------ FastAPI Server ------------------------
 app = FastAPI(title="Voice Coach Backend")
 
-# Enable CORS for local frontend
-# Enable CORS
+# Enable CORS for local frontend and deployed frontend
+# Enable CORS with proper OPTIONS handling
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         # Your Firebase Frontend URL
-        "https://frontend-53528.web.app",  # <--- ADD THIS
+        "https://frontend-53528.web.app",
+        "https://frontend-53528.firebaseapp.com",
         
         # Your Render Backend URL (good to have)
-        "https://backend-0d8r.onrender.com",      # <--- ADD THIS
+        "https://backend-0d8r.onrender.com",
         
         # Local URLs for testing
         "http://localhost:5173",
@@ -360,8 +361,10 @@ app.add_middleware(
         "http://127.0.0.1:8080",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 @app.get("/health")
